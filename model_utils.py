@@ -16,19 +16,24 @@ def fetch_data(ticker):
     return df
 
 def engineer_features(df):
-    df["return"] = df["Close"].pct_change()
-    df["volatility"] = df["return"].rolling(5).std()
-    df["vwap"] = (df["High"] + df["Low"] + df["Close"]) / 3
+    df = df.copy()
 
-    df["sma5"] = SMAIndicator(df["Close"], 5).sma_indicator()
-    df["sma20"] = SMAIndicator(df["Close"], 20).sma_indicator()
+    # 🔥 FIX: force Close to 1D
+    close = df["Close"].squeeze()
+
+    df["return"] = close.pct_change()
+    df["volatility"] = df["return"].rolling(5).std()
+    df["vwap"] = (df["High"] + df["Low"] + close) / 3
+
+    df["sma5"] = SMAIndicator(close=close, window=5).sma_indicator()
+    df["sma20"] = SMAIndicator(close=close, window=20).sma_indicator()
     df["momentum"] = df["sma5"] - df["sma20"]
 
-    df["rsi"] = RSIIndicator(df["Close"]).rsi()
-    df["macd"] = MACD(df["Close"]).macd()
+    df["rsi"] = RSIIndicator(close=close, window=14).rsi()
+    df["macd"] = MACD(close=close).macd()
 
-    df["target_price"] = df["Close"].shift(-1)
-    df["direction"] = (df["target_price"] > df["Close"]).astype(int)
+    df["target_price"] = close.shift(-1)
+    df["direction"] = (df["target_price"] > close).astype(int)
 
     df.dropna(inplace=True)
     return df
