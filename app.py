@@ -25,7 +25,9 @@ pred_price, pred_dir = predict_next(df_feat, reg, cls, scaler, features)
 # Metrics
 col1, col2, col3 = st.columns(3)
 
-col1.metric("Current Price", f"{df_feat['Close'].iloc[-1]:.2f}")
+current_price = float(df_feat["Close"].squeeze().iloc[-1])
+col1.metric("Current Price", f"{current_price:.2f}")
+
 col2.metric("Predicted Next Price", f"{pred_price:.2f}")
 col3.metric("Signal", "📈 BUY" if pred_dir==1 else "📉 SELL")
 
