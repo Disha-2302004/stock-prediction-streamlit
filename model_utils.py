@@ -7,11 +7,16 @@ from ta.momentum import RSIIndicator
 # ---------------- FETCH DATA ----------------
 def fetch_data(ticker, period="6mo", interval="1d"):
     df = yf.download(ticker, period=period, interval=interval)
+
+    # ✅ FIX 1: Flatten MultiIndex columns (CRITICAL)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
     df.reset_index(inplace=True)
 
-    # Force numeric + 1D safety
+    # ✅ FIX 2: Ensure numeric 1D Series
     for col in ["Open", "High", "Low", "Close", "Volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        df[col] = df[col].astype(float)
 
     return df
 
@@ -20,12 +25,14 @@ def fetch_data(ticker, period="6mo", interval="1d"):
 def engineer_features(df):
     df = df.copy()
 
-    # 🔴 CRITICAL FIX: force 1D array
-    close = df["Close"].values.flatten()
+    # ✅ FIX 3: force Close to strict 1D
+    close = df["Close"].to_numpy().flatten()
 
-    df["sma5"] = SMAIndicator(pd.Series(close), window=5).sma_indicator()
-    df["sma10"] = SMAIndicator(pd.Series(close), window=10).sma_indicator()
-    df["rsi"] = RSIIndicator(pd.Series(close), window=14).rsi()
+    close_series = pd.Series(close)
+
+    df["sma5"] = SMAIndicator(close_series, window=5).sma_indicator()
+    df["sma10"] = SMAIndicator(close_series, window=10).sma_indicator()
+    df["rsi"] = RSIIndicator(close_series, window=14).rsi()
 
     df.fillna(method="bfill", inplace=True)
     df.fillna(method="ffill", inplace=True)
@@ -37,12 +44,8 @@ def engineer_features(df):
 def generate_signal(df):
     latest = df.iloc[-1]
 
-    buy_condition = (
-        latest["sma5"] > latest["sma10"]
-        and latest["rsi"] < 70
-    )
-
-    signal = "BUY" if buy_condition else "SELL"
+    buy = latest["sma5"] > latest["sma10"] and latest["rsi"] < 70
+    signal = "BUY" if buy else "SELL"
 
     return {
         "signal": signal,
