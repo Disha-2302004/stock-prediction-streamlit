@@ -1,6 +1,7 @@
 import streamlit as st
 import plotly.graph_objects as go
-from utils import fetch_data, engineer_features, generate_signal
+from model_utils import fetch_data, engineer_features, generate_signal
+
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
