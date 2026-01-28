@@ -9,8 +9,9 @@ def fetch_data(ticker, period="6mo", interval="1d"):
     df = yf.download(ticker, period=period, interval=interval)
     df.reset_index(inplace=True)
 
+    # Force numeric + 1D safety
     for col in ["Open", "High", "Low", "Close", "Volume"]:
-        df[col] = df[col].astype(float)
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df
 
@@ -18,11 +19,13 @@ def fetch_data(ticker, period="6mo", interval="1d"):
 # ---------------- FEATURE ENGINEERING ----------------
 def engineer_features(df):
     df = df.copy()
-    close = df["Close"]
 
-    df["sma5"] = SMAIndicator(close, window=5).sma_indicator()
-    df["sma10"] = SMAIndicator(close, window=10).sma_indicator()
-    df["rsi"] = RSIIndicator(close, window=14).rsi()
+    # 🔴 CRITICAL FIX: force 1D array
+    close = df["Close"].values.flatten()
+
+    df["sma5"] = SMAIndicator(pd.Series(close), window=5).sma_indicator()
+    df["sma10"] = SMAIndicator(pd.Series(close), window=10).sma_indicator()
+    df["rsi"] = RSIIndicator(pd.Series(close), window=14).rsi()
 
     df.fillna(method="bfill", inplace=True)
     df.fillna(method="ffill", inplace=True)
@@ -39,15 +42,7 @@ def generate_signal(df):
         and latest["rsi"] < 70
     )
 
-    sell_condition = (
-        latest["sma5"] < latest["sma10"]
-        or latest["rsi"] > 70
-    )
-
-    if buy_condition:
-        signal = "BUY"
-    else:
-        signal = "SELL"
+    signal = "BUY" if buy_condition else "SELL"
 
     return {
         "signal": signal,
