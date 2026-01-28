@@ -1,77 +1,83 @@
-import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
-from ta.trend import SMAIndicator, MACD
-from ta.momentum import RSIIndicator
-from sklearn.preprocessing import StandardScaler
-import xgboost as xgb
+import yfinance as yf
 import joblib
 
-TICKERS = ["AAPL", "MSFT", "TSLA", "GOOGL", "AMZN"]
+from ta.trend import SMAIndicator, EMAIndicator
+from ta.momentum import RSIIndicator
 
-def fetch_data(ticker):
-    df = yf.download(ticker, start="2022-01-01", end=datetime.today())
+
+# ---------------- LOAD MODEL ----------------
+def load_model():
+    return joblib.load("xgboost_model.pkl")
+
+
+# ---------------- FETCH DATA ----------------
+def fetch_data(ticker, period="6mo", interval="1d"):
+    df = yf.download(ticker, period=period, interval=interval)
     df.reset_index(inplace=True)
+
+    for col in ["Open", "High", "Low", "Close", "Volume"]:
+        df[col] = df[col].astype(float)
+
     return df
 
+
+# ---------------- FEATURE ENGINEERING ----------------
 def engineer_features(df):
     df = df.copy()
 
-    # 🔥 FORCE ALL PRICE COLUMNS TO 1D SERIES
-    close = df["Close"].squeeze()
-    high = df["High"].squeeze()
-    low = df["Low"].squeeze()
-    open_ = df["Open"].squeeze()
-    volume = df["Volume"].squeeze()
+    close = df["Close"]
 
-    # Core features
-    df["return"] = close.pct_change()
-    df["volatility"] = df["return"].rolling(5).std()
+    df["sma5"] = SMAIndicator(close, window=5).sma_indicator()
+    df["sma10"] = SMAIndicator(close, window=10).sma_indicator()
+    df["ema5"] = EMAIndicator(close, window=5).ema_indicator()
+    df["rsi"] = RSIIndicator(close, window=14).rsi()
 
-    # ✅ FIXED VWAP (now all 1D)
-    df["vwap"] = (high + low + close) / 3
+    df["vwap"] = (df["High"] + df["Low"] + close) / 3
+    df["returns"] = close.pct_change()
+    df["volatility"] = df["returns"].rolling(10).std()
 
-    # Moving averages
-    df["sma5"] = SMAIndicator(close=close, window=5).sma_indicator()
-    df["sma20"] = SMAIndicator(close=close, window=20).sma_indicator()
-    df["momentum"] = df["sma5"] - df["sma20"]
+    df.fillna(method="bfill", inplace=True)
+    df.fillna(method="ffill", inplace=True)
 
-    # Indicators
-    df["rsi"] = RSIIndicator(close=close, window=14).rsi()
-    df["macd"] = MACD(close=close).macd()
-
-    # Targets
-    df["target_price"] = close.shift(-1)
-    df["direction"] = (df["target_price"] > close).astype(int)
-
-    df.dropna(inplace=True)
     return df
 
-def train_model(df):
-    features = ["Open","High","Low","Close","Volume","vwap","return",
-                "volatility","sma5","sma20","momentum","rsi","macd"]
 
-    X = df[features]
-    y_reg = df["target_price"]
-    y_cls = df["direction"]
+# ---------------- PREDICTION ----------------
+def predict_price(model, df):
+    feature_cols = [
+        "Close",
+        "sma5",
+        "sma10",
+        "ema5",
+        "rsi",
+        "vwap",
+        "volatility"
+    ]
 
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    X = df[feature_cols].iloc[-1:].values
+    predicted_price = float(model.predict(X)[0])
 
-    reg = xgb.XGBRegressor(n_estimators=300, learning_rate=0.05)
-    cls = xgb.XGBClassifier(n_estimators=300)
+    current_price = float(df["Close"].iloc[-1])
+    signal = 1 if predicted_price > current_price else 0
 
-    reg.fit(X_scaled, y_reg)
-    cls.fit(X_scaled, y_cls)
+    return predicted_price, signal
 
-    return reg, cls, scaler, features
 
-def predict_next(df, reg, cls, scaler, features):
-    last_row = df.iloc[-1:][features]
-    scaled = scaler.transform(last_row)
+# ---------------- DASHBOARD METRICS ----------------
+def calculate_dashboard_metrics(df, predicted_price):
+    current_price = float(df["Close"].iloc[-1])
 
-    price = reg.predict(scaled)[0]
-    direction = cls.predict(scaled)[0]
+    price_change = predicted_price - current_price
+    pct_change = (price_change / current_price) * 100
 
-    return price, direction
+    return {
+        "current_price": current_price,
+        "predicted_price": predicted_price,
+        "pct_change": pct_change,
+        "rsi": float(df["rsi"].iloc[-1]),
+        "sma5": float(df["sma5"].iloc[-1]),
+        "sma10": float(df["sma10"].iloc[-1]),
+        "volatility": float(df["volatility"].iloc[-1])
+    }
